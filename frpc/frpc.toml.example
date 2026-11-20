@@ -24,11 +24,12 @@ transport.heartbeatTimeout = 60
 [[proxies]]
 type = "tcp"
 # 面板里创建隧道时分配的 name，不能随便改
+# 例：name = "AbCd1234EfGh"
 name = "your-tunnel-name"
 localIP = "127.0.0.1"
 # 本机 web 代理端口（与 start-mobile-web.sh 的 PORT 一致）
 localPort = 8790
-# 公网访问端口：https://<serverAddr>:<remotePort>/
+# 公网访问端口：最终地址 = https:// + 上面 serverAddr 的值 + ":" + 这里填的 remotePort + "/"
 remotePort = 8790
 
 # 报错时可以先删掉下面两行试试

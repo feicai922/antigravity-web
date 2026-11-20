@@ -70,7 +70,7 @@ case "${1:-start}" in
     fi
     ;;
   url)
-    url="$(current_url)"; echo "${url:-<none>}"
+    url="$(current_url)"; echo "${url:-(none)}"
     ;;
   status)
     if tmux has-session -t "$SESSION" 2>/dev/null; then

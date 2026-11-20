@@ -36,7 +36,8 @@
 ### 安装
 
 ```bash
-git clone <this-repo> antigravity-web && cd antigravity-web
+git clone https://github.com/feicai922/antigravity-web.git
+cd antigravity-web
 npm install
 npm run build          # 预编译到 dist/，启动快一个数量级
 ```
@@ -48,16 +49,20 @@ npm run build          # 预编译到 dist/，启动快一个数量级
 npm run web -- /path/to/workspace
 
 # B. 附加模式：挂到已经跑着的语言服务器（Linux `agy --hub` 场景，推荐）
-AG_ATTACH_URL=https://127.0.0.1:<ls-https-port> \
-AG_CSRF_TOKEN=<ls-csrf-token> \
-  node dist/src/server/web-poc/server.js /path/to/workspace
+#    端口和 CSRF 令牌在语言服务器的启动日志里；下面的值只是格式示例。
+#    用 ./scripts/start-mobile-web.sh 启动时会自动探测，不需要手填。
+AG_ATTACH_URL=https://127.0.0.1:39165 \
+AG_CSRF_TOKEN=a6403551-f1e7-43f3-a8e4-4b2f867d1027 \
+  node dist/src/server/web-poc/server.js /data1/workspace/demo
 ```
 
-打开终端里打印的地址（首次需接受自签证书）：
+打开终端里打印的地址（首次需接受自签证书），形如：
 
 ```
-https://localhost:8790/?t=<访问令牌>
+https://localhost:8790/?t=WoxOOeQ-GEPBLkxLG19Q6YETGtDlsQf
 ```
+
+`?t=` 后面那一串是访问令牌，启动时会自动生成并打印在终端里。
 
 > 一键脚本（推荐）见下方「内网穿透」。
 
@@ -65,7 +70,12 @@ https://localhost:8790/?t=<访问令牌>
 
 ## 内网穿透
 
-目标：在手机上打开 `https://<你的域名或IP>:<端口>/?t=<令牌>`，直接使用桌面版 UI。
+目标：在手机上打开一个带令牌的地址，直接使用桌面版 UI，例如：
+
+```
+https://antigravity.example.com/?t=WoxOOeQ-GEPBLkxLG19Q6YETGtDlsQf
+https://203.0.113.10:8790/?t=WoxOOeQ-GEPBLkxLG19Q6YETGtDlsQf
+```
 
 ### 方案对比
 
@@ -140,7 +150,7 @@ AUTH=off ./scripts/start-mobile-web.sh start    # 只在内网/Tailscale 使用�
 
 - 令牌首次启动随机生成，存 `.mobile-web/auth_token`（600），**重启不变**；
 - 首次访问会看到「访问令牌」页，粘贴后写入 `ag_auth` Cookie（HttpOnly + Secure + SameSite=Lax）；
-- 也可以直接用 `?t=<token>` 登录，服务器会把参数从地址栏去掉；
+- 也可以直接用 `?t=WoxOOeQ-GEPBLkxLG19Q6YETGtDlsQf` 这种形式登录，服务器会把参数从地址栏去掉；
 - 无 Cookie 的静态资源与 RPC 一律 401。
 
 ### 一键脚本
@@ -203,7 +213,10 @@ PROXY_FORWARD=jumphost:7890 \
 ## 常见问题
 
 **一直转圈进不去？**
-先量带宽：`curl -o /dev/null -w '%{speed_download}\n' https://<地址>/main.js`。
+先量带宽：
+```bash
+curl -o /dev/null -w '%{speed_download}\n' https://antigravity.example.com/main.js
+```
 低于 500 KB/s 基本就是隧道节点限速，换节点或用 Cloudflare。
 
 **界面显示「No Model Selected」/ 项目为空？**

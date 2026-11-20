@@ -16,7 +16,8 @@ language_server --extension_server_port … --workspace_id … --enable_lsp …
 但 Linux 的 CLI / IDE 版本里，那个 Go 二进制叫 `agy`，命令行完全是另一套：
 
 ```bash
-agy --hub --hub-port=<port> --app_data_dir=<ns> --csrf_token=<uuid> --add-dir=<dir>
+agy --hub --hub-port=35833 --app_data_dir=antigravity \
+    --csrf_token=a6403551-f1e7-43f3-a8e4-4b2f867d1027 --add-dir=/data1/workspace
 ```
 
 `--extension_server_port` 这种参数它根本不认（`flags provided but not defined`）。于是本项目的代理增加了**附加模式**
@@ -27,7 +28,8 @@ agy --hub --hub-port=<port> --app_data_dir=<ns> --csrf_token=<uuid> --add-dir=<d
 - `agy --hub` 需要 **pty**（它是个 bubbletea TUI），所以要在 tmux / `script` 里跑；
 - 必须带 **`AGY_ENABLE_HUB=1`**，否则前端端口虽然起来了但 `/` 一律 404；
 - 它同时开两个口：一个 HTTPS（前端 + ConnectRPC，**代理指向这个**），一个明文 HTTP hub 口（TUI 里会打印带 `#t=` 的地址）；
-- 端口是随机的，用不上固定端口的话就按「哪个口能返回 `<title>Antigravity</title>`」来识别。
+- 端口是随机的（上例的 35833 只是其中一次），所以代理按「哪个口能返回
+  `<title>Antigravity</title>`」来识别真正的那个前端端口。
 
 ---
 

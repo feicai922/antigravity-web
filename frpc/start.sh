@@ -68,7 +68,7 @@ case "${1:-start}" in
     if [ -n "$pid" ]; then
       log "running (pid $pid)"
       url="$(public_url || true)"
-      log "public: ${url:-<unknown>}"
+      log "public: ${url:-(unknown)}"
       if [ -n "$url" ]; then
         code="$(curl -sk -m 6 -o /dev/null -w '%{http_code}' "$url" || echo 000)"
         case "$code" in

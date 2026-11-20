@@ -6,7 +6,7 @@
 # Why this script exists: on Linux the Antigravity "language server" binary is
 # `~/.gemini/bin/agy`, which has a different CLI surface from the macOS/Windows
 # `language_server` the npm POC was written for. It runs as
-#     agy --hub --hub-port=<n> --app_data_dir=<ns> --csrf_token=<uuid>
+#     agy --hub --hub-port=35833 --app_data_dir=antigravity --csrf_token=a6403551-...
 # inside a pty (bubbletea TUI) and then serves
 #     * the IDE frontend on an ephemeral HTTPS port   <-- that is what we proxy
 #     * a small browser UI on the plain-HTTP hub port
@@ -20,7 +20,7 @@
 #
 # Env knobs:
 #   PORT=8790              proxy listen port (this is the port you tunnel)
-#   WORKSPACE=<dir>        workspace folder the agent works in (default: repo)
+#   WORKSPACE=/data1/workspace   workspace folder the agent works in (default: repo)
 #   APP_DATA_DIR=antigravity   conversation namespace under ~/.gemini
 #                          (use antigravity_client to run alongside the IDE)
 #   HUB_PORT=0             hub port, 0 = random
@@ -97,7 +97,7 @@ is_frontend_port() {
 
 # Pid of the running agy hub process.
 # `pgrep -f` alone also matches the wrapper shell (`env … agy --hub … | tee`),
-# so require /proc/<pid>/exe to be the binary itself.
+# so we compare the resolved /proc/PID/exe against the binary path as well.
 agy_pid() {
   local p want
   want="$(readlink -f "$AGY_BIN" 2>/dev/null || echo "$AGY_BIN")"
