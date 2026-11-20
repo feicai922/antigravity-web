@@ -31,9 +31,13 @@
   var updaterListeners = new Set();
   window.electronUpdater = {
     onStateChanged: function (cb) { return subscribe(updaterListeners, cb); },
+    // 2.7.x calls getState() at startup and crashes without it
+    // ("a.getState is not a function" → blank page). Shape: { type, update? }.
+    getState: function () { return Promise.resolve({ type: "idle" }); },
+    checkForUpdates: function () { return Promise.resolve(); },
+    downloadUpdate: function () { return Promise.resolve(); },
     applyUpdate: function () { return Promise.resolve(); },
     quitAndInstall: function () { return Promise.resolve(); },
-    checkForUpdates: function () { return Promise.resolve(); },
   };
 
   // ---------------------------------------------------------------------------

@@ -1,460 +1,259 @@
-<div align="center">
+# Antigravity Web（非官方）
 
-# Antigravity Client
+> 在**纯浏览器**里跑 Antigravity IDE 的 Web UI，并把「远程 + 手机」这条路上的坑补平：
+> 手机排版、中文界面、访问令牌门禁、内网穿透脚本、首屏提速。
 
-**Unofficial TypeScript client & CLI for the [Antigravity](https://antigravity.dev) Language Server**
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-
-*Communicate directly with the Language Server binary via ConnectRPC. No IDE required.*
-
-[日本語版 README はこちら](README_ja.md)
-
-</div>
+本项目是 [jkfujinami/antigravity-client](https://github.com/jkfujinami/antigravity-client) 中 `web-poc` 思路的延续与工程化：
+用反向代理把官方前端原样搬到浏览器里，并在代理层补齐它缺少的东西。
+**非官方项目，与 Google / Antigravity 官方无关。**
 
 ---
 
-## What is this?
+## 它做了什么
 
-A standalone TypeScript library for communicating directly with the **Antigravity Language Server (LS)** binary via its ConnectRPC (gRPC-Web) protocol. Built by reverse-engineering the IDE's frontend code and reconstructing the original Protobuf schemas.
-
-Unlike the official SDK (which extends the IDE via the VS Code Extension API), this project talks to the LS process itself — giving you raw, unrestricted access to every RPC method, every Protobuf message, and every streaming endpoint.
-
-> [!IMPORTANT]
-> This is **not** a VS Code extension SDK. This is a low-level client library that communicates directly with the Language Server binary over ConnectRPC. It can operate without a running IDE.
-
----
-
-## 🤖 A Powerful Infrastructure for AI Agents
-
-Antigravity LS is not just a tool; it is a **robust foundation for building autonomous AI agents.** By using this SDK, you can leverage the Language Server as a managed backend for your custom agents.
-
-- **Managed Context & Sessions**: The LS server handles the complex heavy lifting of session management and context window optimization. This allows you to focus on high-layer development and agent logic rather than low-level state handling.
-- **Advanced Prompt Tuning**: Inject custom prompts and metadata at a per-message level. This granular control allows for precise adjustment of agent behavior in specific scenarios.
-- **Integrated Tooling & Search**: Seamlessly integrate web search, file indexing, and terminal execution. You can build custom agents that utilize these tools with surgical precision through a single SDK interface.
-- **Event-Driven Architecture**: The SDK features a modern, event-driven `Cascade` API, cleanly separating stream management, state parsing, and API interaction, making it highly extensible and easy to reason about.
-
-By offloading context management to the LS, you can spend your time engineering the "brain" of your agent rather than its infrastructure.
+| 能力 | 说明 |
+| --- | --- |
+| 浏览器跑官方 UI | 反向代理语言服务器自带的前端，注入 Electron `preload.js` 的 Web 等价实现，前端 bundle 本身不改一行 |
+| 接入已有语言服务器 | 支持 `AG_ATTACH_URL` 直接挂到已在运行的语言服务器（Linux 上 `agy --hub` 的形态），不必重新启动一个 |
+| Linux 适配 | Linux 的「language server」其实是 `~/.gemini/bin/agy --hub`，命令行参数与桌面版 `language_server` 完全不同；这里做了适配，并从 CLI 的 OAuth 令牌文件回退鉴权 |
+| 手机排版 | 侧栏改为浮层抽屉、键盘避让、触控热区放大、会话列表点击走 SPA 路由 |
+| 中文界面 | 前端没有 i18n，这里用「精确匹配词表 + DOM 观察器」做中文层，不动消息内容和代码 |
+| 访问令牌 | 公网暴露必须的令牌门禁：登录页 → `ag_auth` Cookie，静态资源与 RPC 同样校验 |
+| 内网穿透 | 自带 frp 与 Cloudflare Tunnel 两套启动脚本，含出网代理（SSH 隧道）处理 |
+| 首屏优化 | 只对 HTML 要 identity、其余透传 gzip（12.4 MB → 3.8 MB）、静态资源缓存、屏蔽会阻塞渲染的 Google Fonts |
 
 ---
 
-## Quick Start
+## 快速开始
+
+### 前置
+
+- 已安装 Antigravity（或它的 CLI / IDE），且**已登录**
+  - 桌面版：读 `~/.config/Antigravity( IDE)/User/globalStorage/state.vscdb`
+  - Linux CLI：读 `~/.gemini/jetski-standalone-oauth-token`
+- Node.js ≥ 20、`openssl`（首次生成自签证书用）
+
+### 安装
 
 ```bash
-npm install github:jkfujinami/antigravity-client
+git clone <this-repo> antigravity-web && cd antigravity-web
+npm install
+npm run build          # 预编译到 dist/，启动快一个数量级
 ```
 
-```typescript
-import { AntigravityClient } from "antigravity-client";
-
-const client = await AntigravityClient.connect();
-const status = await client.getUserStatus();
-console.log(`Connected as: ${status.userStatus?.name}`);
-```
-
----
-
-## Features
-
-### Direct Language Server Communication
-
-The SDK exposes a type-safe `LanguageServerFacade` wrapping **all 188 RPC methods** from the LS service definition. Every method accepts and returns fully-typed Protobuf messages — no string keys, no `any`.
-
-```typescript
-const client = await AntigravityClient.connect();
-
-// Call any of the 188 RPC methods directly
-const response = await client.languageServer.acceptTermsOfService({ metadata });
-const models   = await client.languageServer.getCascadeModelConfigs({ metadata });
-const status   = await client.languageServer.getMcpServerStates({});
-
-// Or use the convenience wrapper
-const userStatus = await client.getUserStatus();
-```
-
-> [!NOTE]
-> The facade layer (`src/facade/`) is auto-generated from the reconstructed Protobuf schemas. Each method accepts a plain object matching the request message shape and returns the fully-typed response.
-
-### Event-Driven Cascade API
-
-The `Cascade` class manages real-time streaming from the AI agent. It internally splits the work into two modules: `CascadeStreamHandler` (gRPC stream lifecycle) and `CascadeEventParser` (state diffing and event emission), exposing **130 typed events** — from high-level (`text`, `thinking`, `statusChange`) to granular per-step events (`step:runCommand`, `step:writeToFile`, `step:browserSubagent`, etc.).
-
-```typescript
-const cascade = await client.startCascade();
-
-// High-level events
-cascade.on(Cascade.Events.Text, (ev) => process.stdout.write(ev.delta));
-cascade.on(Cascade.Events.Thinking, (ev) => process.stdout.write(ev.delta));
-cascade.on(Cascade.Events.StatusChange, (ev) => {
-    console.log(`${ev.previousStatus} → ${ev.status}`);
-});
-
-// Granular per-step events (one for each of the ~120 step types)
-cascade.on(Cascade.Events.RunCommand, (ev) => {
-    console.log(`Command: ${ev.step.value.proposedCommandLine}`);
-});
-cascade.on(Cascade.Events.WriteToFile, (ev) => {
-    console.log(`File: ${ev.step.value.filePath}`);
-});
-
-// Interaction approval (commands, file edits, browser actions)
-cascade.on(Cascade.Events.Interaction, async (req) => {
-    if (req.type === "run_command") {
-        await req.approve();
-    }
-});
-```
-
-### High-Level Convenience Methods
-
-For simple use cases, skip the event wiring entirely.
-
-```typescript
-// One-shot: send a prompt, wait for completion, get results
-const result = await cascade.run("Fix all TypeScript errors in this project", {
-    model: "Gemini_3_Flash",
-    timeoutMs: 120_000,
-});
-
-console.log(result.text);        // Full response text
-console.log(result.newSteps);    // CascadeStep[] added this turn
-console.log(result.finalStatus); // "idle" | "running" | ...
-console.log(result.timedOut);    // boolean
-
-// Other high-level helpers
-await cascade.waitForIdle();
-await cascade.waitForTurnComplete();
-await cascade.cancelAndWait();
-```
-
-### Approval Control
-
-Programmatically approve or reject agent actions — terminal commands, file edits, browser navigation.
-
-```typescript
-// Terminal command approval
-await cascade.approveCommand(stepIndex, "npm install");
-await cascade.denyCommand(stepIndex, "rm -rf /");
-
-// File permission
-await cascade.approveFilePermission(stepIndex, "/path/to/file", PermissionScope.ONCE);
-await cascade.denyFilePermission(stepIndex, "/path/to/file");
-
-// Browser URL
-await cascade.approveOpenBrowserUrl(stepIndex);
-await cascade.denyOpenBrowserUrl(stepIndex);
-
-// Generic interaction
-await cascade.sendInteraction(stepIndex, "permission", { allow: true, scope: 1 });
-```
-
-### Model Selection
-
-Query available models and select per-message.
-
-```typescript
-// List available models
-const models = await client.getAvailableModels();
-// => { Gemini_3_Flash: { modelId: 42, isRecommended: true, ... }, ... }
-
-// Send with explicit model
-await cascade.sendMessage("Explain this code", {
-    model: "Gemini_3_Flash",     // By name
-    // model: 42,                // Or by numeric ID
-});
-
-// Attach images
-await cascade.sendMessage("What's in this screenshot?", {
-    images: [{
-        base64Data: "iVBOR...",
-        mimeType: "image/png",
-        caption: "Error screenshot",
-    }],
-});
-```
-
-### Standalone Mode (No IDE)
-
-Launch an independent Language Server process without a running Antigravity IDE. The SDK starts a Mock Extension Server to supply OAuth tokens via the USS protocol.
-
-```typescript
-const client = await AntigravityClient.launch({
-    workspacePath: "/path/to/project",
-    verbose: true,
-    cdpPort: 9222,  // Optional: Chrome DevTools Protocol port
-});
-
-// Use normally
-const cascade = await client.startCascade();
-const result = await cascade.run("Analyze this codebase");
-
-// Clean up
-client.dispose();
-client.launcher.stop();
-```
-
-### Session Management
-
-Resume, list, and manage cascade conversations.
-
-```typescript
-// Resume an existing cascade by ID (verifies it's alive)
-const cascade = await client.resumeCascade("76a484e0-...");
-
-// Attach to a cascade without verification
-const cascade2 = client.getCascade("76a484e0-...");
-
-// Fetch full trajectory history
-const history = await cascade.getHistory();
-
-// Cancel in-flight work
-await cascade.cancel();
-
-// Stream cascade summaries (list of all conversations)
-for await (const update of client.getSummariesStream()) {
-    console.log(update);
-}
-```
-
-### Quick Model Response
-
-Get a one-shot AI response without creating a full cascade session.
-
-```typescript
-const response = await client.getModelResponse(
-    "What is the capital of France?",
-    Model.GEMINI_3_FLASH
-);
-console.log(response); // "Paris"
-```
-
----
-
-## Connection Methods
-
-| Method | Description | IDE Required |
-|--------|-------------|:---:|
-| `AntigravityClient.connect()` | Auto-detect running LS process | Yes |
-| `AntigravityClient.connect({ port, csrfToken })` | Manual connection to known LS | Yes |
-| `AntigravityClient.connectWithServer(serverInfo)` | Connect via `ServerInfo` object | Yes |
-| `AntigravityClient.launch(options)` | Start independent LS + Mock Extension Server | **No** |
-| `AntigravityClient.listServers()` | Discover all running LS processes | Yes |
-
----
-
-## Web UI (Browser)
-
-Run the **stock Antigravity IDE web UI in a plain browser** — no Electron, no IDE install required. `npm run web` launches a standalone Language Server and serves its *unmodified* frontend through a reverse proxy that speaks HTTP/2 to the browser and injects a web port of Electron's `preload.js`, so the original bundle runs untouched.
+### 启动（两种模式）
 
 ```bash
-# Installed as a dependency — run via npx:
-npx antigravity-web
-# …or install globally for a bare `antigravity-web` command:
-npm install -g github:jkfujinami/antigravity-client
+# A. 独立模式：由本项目拉起一个语言服务器（桌面版布局 / Windows / macOS）
+npm run web -- /path/to/workspace
 
-# From a checkout of this repo:
-npm run web
-
-# → then open https://localhost:8765/  (accept the self-signed cert warning once)
+# B. 附加模式：挂到已经跑着的语言服务器（Linux `agy --hub` 场景，推荐）
+AG_ATTACH_URL=https://127.0.0.1:<ls-https-port> \
+AG_CSRF_TOKEN=<ls-csrf-token> \
+  node dist/src/server/web-poc/server.js /path/to/workspace
 ```
 
-By default it points at your real `~/.gemini` profile with `appDataDir: "antigravity"` (the IDE's namespace), so your existing **Projects and conversations show up** in the browser. **Close the Antigravity IDE first** — two Language Servers writing the same state can corrupt it. Use an isolated profile to run alongside the IDE safely.
+打开终端里打印的地址（首次需接受自签证书）：
+
+```
+https://localhost:8790/?t=<访问令牌>
+```
+
+> 一键脚本（推荐）见下方「内网穿透」。
+
+---
+
+## 内网穿透
+
+目标：在手机上打开 `https://<你的域名或IP>:<端口>/?t=<令牌>`，直接使用桌面版 UI。
+
+### 方案对比
+
+| 方案 | 需要什么 | 优点 | 缺点 |
+| --- | --- | --- | --- |
+| **frp** | 一台有公网 IP 的服务器 / 面板账号 | 延迟低、可控、便宜 | 免费节点常限速，带宽抖动大 |
+| **Cloudflare Tunnel** | 一个托管在 Cloudflare 的域名 | 证书有效（手机不弹告警）、速度稳定、无需公网 IP、无需备案 | 依赖 Cloudflare 边缘可达 |
+| **Tailscale** | 装客户端 | 零配置、最安全（不暴露公网） | 手机需装 VPN 类 App |
+
+代理内置了访问控制：默认只允许 `127.0.0.1` 与 Tailscale CGNAT 段（`100.64.0.0/10`）直接连接。
+frp / cloudflared 都是**从本机 `127.0.0.1` 转发**，所以天然放行；其余来源必须过令牌门禁。
+
+### A. frp
+
+1. 在 frp 面板建一条 **TCP 隧道**：本地 `127.0.0.1:8790`，远程端口任选；
+2. 把面板生成的配置保存成 `frpc/frpc.toml`（**不要提交**，仓库里只有 `frpc/frpc.toml.example`）；
+3. 启动：
 
 ```bash
-# Positional args:  [workspacePath] [geminiDir] [appDataDir]
-npm run web -- /path/to/project
-
-# Isolated profile (safe to run while the IDE is open)
-npm run web -- /path/to/project /tmp/gemini_iso antigravity_client
-
-# The antigravity-web bin takes the same positional args directly (no `--`)
-antigravity-web /path/to/project /tmp/gemini_iso antigravity_client
-
-# Env vars work with either form
-PORT=9000 GEMINI_DIR=~/.gemini APP_DATA_DIR=antigravity npx antigravity-web
+cp frpc/frpc.toml.example frpc/frpc.toml   # 首次：按注释改成你自己的面板信息
+./frpc/start.sh start      # 后台跑在 tmux 会话里
+./frpc/start.sh status     # 打印公网地址并探测（401 = 隧道通、只是要令牌）
+./frpc/start.sh stop
 ```
 
-| Option | Positional | Env | Default |
-|--------|-----------|-----|---------|
-| Workspace path | `argv[2]` | — | `cwd()` |
-| Gemini profile dir | `argv[3]` | `GEMINI_DIR` | `~/.gemini` |
-| App-data namespace | `argv[4]` | `APP_DATA_DIR` | `antigravity` |
-| Listen port | — | `PORT` | `8765` |
-| Verbose logging | — | `VERBOSE` | off |
+> **注意**：便宜节点的带宽经常是「突发型」，同一个 3.8 MB 的 bundle 可能 0.5 s 下完，
+> 也可能要 26 s —— 首屏一直转圈多半是它。要么换节点，要么走 Cloudflare。
+> 静态资源已加 `max-age`，只有**首次**访问吃这个带宽。
 
-> **Why HTTP/2?** The UI opens many long-lived server-streams at once (notably one `WatchDirectory` per open file). Over HTTP/1.1 a browser caps at ~6 connections per origin, starving the extra streams so the file view spins forever. HTTP/2 multiplexes them all over a single connection — exactly what the native app does — which is why the proxy serves the browser over TLS h2.
-
----
-
-## Architecture
-
-```
-Your App / CLI / Agent
-        │
-        ▼
-┌──────────────────────────────────────────────────────┐
-│                 antigravity-client                    │
-│                                                      │
-│  AntigravityClient          ← Connection & lifecycle │
-│    .languageServer          ← 188 RPC methods        │
-│    .startCascade()          ← Event-driven sessions  │
-│    .resumeCascade()         ← Session recovery       │
-│    .getModelResponse()      ← One-shot inference     │
-│                                                      │
-│  Cascade                    ← EventEmitter           │
-│    ├─ CascadeStreamHandler  ← gRPC stream lifecycle  │
-│    └─ CascadeEventParser    ← State diff → 130 events│
-│                                                      │
-│  LanguageServerFacade       ← Auto-generated facade  │
-│    (188 type-safe methods)                           │
-│                                                      │
-│  Launcher + MockExtServer   ← Standalone mode        │
-│  AutoDetector               ← LS process discovery   │
-│  AuthReader                 ← OAuth from state.vscdb │
-└──────────────────────────────────────────────────────┘
-        │
-        ▼ ConnectRPC (HTTP/2 + TLS)
-┌──────────────────────────────────────────────────────┐
-│           Language Server (Go binary)                │
-│           127.0.0.1:<port>                           │
-└──────────────────────────────────────────────────────┘
-        │
-        ▼ HTTPS
-┌──────────────────────────────────────────────────────┐
-│               Google AI Backend                      │
-└──────────────────────────────────────────────────────┘
-```
-
-### Source Layout
-
-```
-src/
-├── index.ts                  # Public API exports
-├── core/
-│   ├── client.ts             # AntigravityClient (connect, launch, model resolution)
-│   └── cascade/
-│       ├── index.ts           # Cascade class (EventEmitter + API methods)
-│       ├── stream-handler.ts  # gRPC stream loop & state hydration
-│       └── event-parser.ts    # State diff calculation & event emission
-├── facade/
-│   ├── index.ts               # Type namespace (T.LanguageServer.*)
-│   ├── services.ts            # LanguageServerFacade (188 auto-generated methods)
-│   └── inputs.ts              # Input type definitions
-├── types/
-│   ├── index.ts               # CascadeStep, helper types, enums
-│   └── events.ts              # 130 event constants & payload types
-├── server/
-│   ├── launcher.ts            # Standalone LS process management
-│   ├── mock-extension-server.ts # USS OAuth token provider
-│   └── auth-reader.ts         # SQLite credential reader
-├── utils/
-│   └── autodetect.ts          # LS process discovery (ps, lsof)
-├── reactive/
-│   └── apply.ts               # Protobuf diff application
-└── gen/                       # Generated Protobuf bindings
-    └── exa/
-        ├── language_server_pb/  # LS service & message definitions
-        ├── cortex_pb/           # Cascade state, step types, interactions
-        ├── codeium_common_pb/   # Shared types (Metadata, Model, etc.)
-        └── ...
-```
-
----
-
-## How It Works
-
-All communication happens through three local channels:
-
-1. **ConnectRPC over TLS** — The SDK connects to the LS binary on `127.0.0.1` via HTTP/2 with a per-session CSRF token. This is the same protocol the IDE uses internally.
-2. **Read-only SQLite** — For standalone mode, the SDK reads `state.vscdb` via `better-sqlite3` to extract OAuth tokens. No writes, no external `sqlite3` CLI dependency.
-3. **Process inspection** — Auto-detection uses `ps`/`lsof` (macOS/Linux) or PowerShell `Get-CimInstance`/`Get-NetTCPConnection` (Windows) to find running LS processes and their ports.
-
-No data leaves the local machine through the SDK. The LS binary itself communicates with Google's backend, but the SDK only talks to the LS.
-
----
-
-## Platform Support
-
-| Platform | IDE Connection | Standalone Mode |
-|----------|:-:|:-:|
-| **macOS** (arm64/x64) | ✅ | ✅ |
-| **Linux** (x64) | ✅ | ✅ |
-| **Windows** (x64) | ✅ | ✅ |
-
-> Linux support contributed by [@Masterisk-F](https://github.com/Masterisk-F) ([#7](https://github.com/jkfujinami/antigravity-client/pull/7)).
->
-> Windows support contributed by [@Yusuke-forcode](https://github.com/Yusuke-forcode) ([#9](https://github.com/jkfujinami/antigravity-client/pull/9)).
->
-> **Windows note:** The Web UI requires `openssl` for self-signed cert generation. If Git for Windows is installed, its bundled openssl is auto-detected. Otherwise install via `choco install openssl` or `winget install ShiningLight.OpenSSL`. You can also supply your own certificates via `TLS_CERT` / `TLS_KEY` environment variables (e.g., Tailscale HTTPS certs or mkcert).
->
-> **Windows note (auto-detection):** When *attaching* to an already-running LS, the HTTPS port is inferred from the lowest listening port. On macOS/Linux this is robust (ports are matched by file-descriptor open order); Windows exposes no FD order, so the lowest port number is used as a best-effort proxy. It can occasionally mis-identify the port if Windows allocated the ephemeral ports non-sequentially or wrapped around the dynamic range (49152–65535). Standalone (launched) mode is unaffected — the port is read directly from the LS startup log.
-
----
-
-## Protobuf Schemas
-
-The reconstructed `.proto` schemas used by this project are maintained in a separate repository:
-
-**[jkfujinami/antigravity-grpc-schemas](https://github.com/jkfujinami/antigravity-grpc-schemas)**
-
-These schemas were extracted from the Antigravity IDE's frontend bundle and cover the full LS service definition, including Cascade state management, MCP server control, reactive update streams, and more.
-
----
-
-## Tooling: Mock Generator
-
-When working with complex RPC methods (like `startCascade` or `startBattleMode`), building the exact TypeScript object literal to satisfy the generated ConnectRPC `PartialMessage` type can be tricky. This is especially true for `oneof` fields which require a specific `{ case: "...", value: ... }` structure.
-
-To prevent type errors, this project includes a high-fidelity mock generator that dumps perfectly typed boilerplate:
+### B. Cloudflare Tunnel
 
 ```bash
-# Dump the exact structure required for a method
-npx tsx scripts/mock_gen.ts startCascade
+# 临时隧道（无需账号，域名每次重启都变，适合先试）
+./cloudflare/start.sh start
+./cloudflare/start.sh url
 
-# Or extract a specific nested path (jq-style)
-npx tsx scripts/mock_gen.ts startCascade customAgentSpec.workspace
+# 固定域名：先准备 Cloudflare API Token（Tunnel:Edit + DNS:Edit）
+export CLOUDFLARE_API_TOKEN=...
+export CF_ACCOUNT_ID=...      CF_ZONE_ID=...
+export AG_HOSTNAME=antigravity.example.com
+python3 scripts/setup-cloudflare-tunnel.py     # 建隧道 + 配 ingress + 建 CNAME + 存 token
+./cloudflare/start.sh start                    # 检测到 token 就走 named 模式
 ```
----
 
-## Examples
+`setup-cloudflare-tunnel.py` 会把 ingress 指到 `https://127.0.0.1:8790` 并带上
+`noTLSVerify: true`（本代理是自签证书），连接器凭据写到 `cloudflare/tunnel_token`（600，已 gitignore）。
 
-| File | Description |
-|------|-------------|
-| [`full_workflow.ts`](examples/full_workflow.ts) | Complete event listener with colored terminal output |
-| [`test_cascade_events.ts`](examples/test_cascade_events.ts) | Comprehensive event assertion test |
-| [`test_chat.ts`](examples/test_chat.ts) | Simple send-and-receive |
-| [`test_independent_ls.ts`](examples/test_independent_ls.ts) | Standalone mode (no IDE) |
-| [`test_resume.ts`](examples/test_resume.ts) | Resume an existing cascade |
-| [`test_shell_exec.ts`](examples/test_shell_exec.ts) | Terminal command execution & approval |
-| [`test_universal.ts`](examples/test_universal.ts) | Cross-platform connection test |
-| [`test_custom_agents.ts`](examples/test_custom_agents.ts) | Custom agent configuration |
+### C. 出网代理（很多机房需要）
 
-Run any example with:
+语言服务器要访问 `oauth2.googleapis.com` / `daily-cloudcode-pa.googleapis.com` 才能拿到模型列表和鉴权；
+不少 GPU 节点 / 内网机器**直连不到**，表现就是界面里「No Model Selected」、项目列表空。
+
+如果你有一台能出网的机器（且它能 SSH），可以让脚本顺手建一条 `ssh -L` 隧道并注入 `HTTPS_PROXY`：
 
 ```bash
-npx tsx examples/full_workflow.ts
+PROXY_FORWARD=jumphost:7890 ./scripts/start-mobile-web.sh start
+# 等价于：ssh -N -L 127.0.0.1:7999:127.0.0.1:7890 jumphost
+# 并把 HTTP(S)_PROXY=http://127.0.0.1:7999 传给语言服务器
 ```
 
+`LOCAL_PROXY_PORT`（默认 7999）可以改。Cloudflare 连接器同理可用 `CONNECT_PROXY`。
+
+### D. 访问令牌（务必开启）
+
+公网地址一旦泄露，等于把你的工作区、终端、模型额度一起交出去。代理默认开启令牌门禁：
+
+```bash
+./scripts/start-mobile-web.sh token             # 查看
+./scripts/start-mobile-web.sh token --rotate    # 轮换（重启后生效，手机需重新登录）
+AUTH=off ./scripts/start-mobile-web.sh start    # 只在内网/Tailscale 使用时关闭
+```
+
+- 令牌首次启动随机生成，存 `.mobile-web/auth_token`（600），**重启不变**；
+- 首次访问会看到「访问令牌」页，粘贴后写入 `ag_auth` Cookie（HttpOnly + Secure + SameSite=Lax）；
+- 也可以直接用 `?t=<token>` 登录，服务器会把参数从地址栏去掉；
+- 无 Cookie 的静态资源与 RPC 一律 401。
+
+### 一键脚本
+
+```bash
+PORT=8790 WORKSPACE=/path/to/workspace \
+PROXY_FORWARD=jumphost:7890 \
+  ./scripts/start-mobile-web.sh start     # 启动 / 幂等
+./scripts/start-mobile-web.sh status
+./scripts/start-mobile-web.sh stop
+```
+
+脚本会：选启动方式（`dist` 新鲜就用 `node dist/…`，否则退回 `tsx` 并提示先 build）→
+确保出网隧道 → 拉起语言服务器（tmux）→ 探测前端端口 → 拉起代理（tmux）→ 冒烟自检 → 打印带令牌的地址。
+
 ---
 
-## Disclaimer
+## 移动端适配
 
-> [!WARNING]
-> This project is not affiliated with Google or the Antigravity team. It interacts with the Language Server through reverse-engineered Protobuf schemas. Use at your own risk and in compliance with applicable terms of service.
+在代理层注入两份资源（`src/server/web-poc/mobile.css` + `mobile.js`），`MOBILE_UI=0` 可关闭。
+
+| 问题 | 做法 |
+| --- | --- |
+| 侧栏在窄屏只剩 81 px 图标条，还把正文压到 308 px | 把侧栏抽出 flex 流做成浮层抽屉 `min(84vw, 340px)`，正文回到整屏宽；点击遮罩收起 |
+| 会话行点不动（链接层被压成 0×0、标签容器吃掉点击） | 事件委托：点行 → `pushState` + `popstate`，走应用自己路由**就地渲染**，不整页刷新 |
+| 键盘弹出挡住输入框 | 用 `visualViewport.height` 驱动根容器高度，而非 `dvh` |
+| iOS 聚焦输入框会放大页面 | 触屏设备强制 `font-size: 16px` |
+| 图标按钮 24–28 px，点不准 | `min-width/height: 32px` + `::after` 把热区撑到 ~44 px |
+| hover 才出现的行内操作点不到 | 抽屉内改为路由优先，行内按钮仍可点 |
+| 对话框/表格/长链接撑破屏宽 | 限宽、横向滚动、`overflow-wrap: anywhere` |
+| 刘海与底部指示条 | `env(safe-area-inset-*)` 内边距 |
 
 ---
 
-## Contributing
+## 中文界面
 
-PRs welcome. If you encounter a schema mismatch after an Antigravity update, open an issue with the error message and your LS version.
+前端 bundle 没有任何 i18n 运行时，所以中文是**注入的词表替换层**（`src/server/web-poc/locale-zh.js`）：
 
-1. Fork the repo
-2. Create a feature branch
-3. Follow existing code style
-4. Run `tsc --noEmit` and `npx tsx examples/test_cascade_events.ts` before submitting
+- 只做**精确匹配**（少量带用户数据的正则，如 `Select model, current: X`）；
+- `pre / code / textarea / input / contenteditable / 表格 / 消息气泡` 内容一律不碰 → 对话、代码、文件名保持原样；
+- `MutationObserver` 跟随 React 重渲染重新贴；
+- 单字通用词（`Open` / `Plan` / `High` / `Default` …）故意不收，避免把「Gemini 3.8 Flash High」这类模型名翻掉；
+- 没收录的字符串保持英文，往 `DICT` 里加即可。
+
+开关：`UI_LANG=auto`（默认，浏览器 `Accept-Language` 含 `zh` 才注入）/ `zh` 强制 / `en` 关闭。
 
 ---
+
+## 首屏为什么能快一点
+
+| 手段 | 效果 |
+| --- | --- |
+| 只对 HTML 要 identity，其余保留浏览器的 `accept-encoding` | 主 bundle 12.4 MB → **3.8 MB** |
+| 静态资源加 `cache-control: max-age=3600` | 二次打开基本秒开，也让 Cloudflare 边缘能缓存 |
+| 剥掉 `<link>` 到 `fonts.googleapis.com`，并用最小 CSP 让它**立刻失败** | 该域名不可达时，一个 render-blocking 样式表会把首屏卡十几秒 |
+| 预编译 + 懒加载 launcher | 代理启动从 ~28 s 降到 ~1 s，重启窗口内的连接失败日志几乎消失 |
+
+---
+
+## 常见问题
+
+**一直转圈进不去？**
+先量带宽：`curl -o /dev/null -w '%{speed_download}\n' https://<地址>/main.js`。
+低于 500 KB/s 基本就是隧道节点限速，换节点或用 Cloudflare。
+
+**界面显示「No Model Selected」/ 项目为空？**
+语言服务器出不了网，见「出网代理」。
+
+**白屏 / 证书告警？**
+本代理用自签证书，浏览器首次要「继续访问」。想彻底无告警，给代理传 `TLS_CERT` / `TLS_KEY`
+（真域名证书，或 Cloudflare 托管证书）。用 App 内嵌 WebView 时，自签证书默认会被拒绝，需要自行放行。
+
+**提示 Lost connection to the language server？**
+代理重启会掐断页面到语言服务器的一批长连接。`mobile.js` 已内置兜底：连续 3 次失败会浮出「重新连接」按钮。
+
+**标签页图标不更新？**
+图标缓存很顽固，清理站点数据或重建桌面图标。
+
+---
+
+## 目录
+
+```
+src/server/web-poc/     反向代理、移动端适配、中文词表、preload shim
+scripts/                start-mobile-web.sh（编排）、setup-cloudflare-tunnel.py
+frpc/                   frp 启动脚本 + frpc.toml.example
+cloudflare/             Cloudflare Tunnel 启动脚本
+logo/                   favicon 源图与生成的多尺寸 PNG
+docs/                   深入说明、上游 README
+```
+
+## 主要环境变量
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `PORT` | 8790 | 代理监听端口（内网穿透的本地端口） |
+| `WORKSPACE` | 仓库目录 | agent 的工作区 |
+| `AG_ATTACH_URL` / `AG_CSRF_TOKEN` | — | 附加到一个已在运行的语言服务器 |
+| `AUTH` / `AUTH_TOKEN` / `AUTH_TOKEN_FILE` | on | 访问令牌门禁 |
+| `MOBILE_UI` / `UI_LANG` | 1 / auto | 移动端适配 / 中文界面 |
+| `STRIP_GOOGLE_FONTS` / `BLOCK_EXTERNAL_FONTS` | 1 | 剥掉阻塞渲染的 Google Fonts |
+| `STATIC_CACHE_SECONDS` | 3600 | 静态资源缓存时长（0 关闭） |
+| `PROXY_FORWARD` / `LOCAL_PROXY_PORT` | — / 7999 | 语言服务器的出网代理 |
+| `TLS_CERT` / `TLS_KEY` | 自签 | 自定义证书 |
+
+## 已知限制 / 免责
+
+- 本项目**不是**官方客户端，也不是 IDE 的扩展；它只是把语言服务器自带的前端搬进浏览器。
+- 反向代理会自动注入 CSRF 令牌，等于把语言服务器的能力完全暴露给能访问该端口的人 —— **公网部署必须开令牌门禁**（默认已开）。
+- 自签证书 + `noTLSVerify` 会关闭对中间人的防护，只应在你自己控制的链路上使用。
+- 中文界面是词表替换，新版本前端新增文案需要补词表；移动端适配依赖前端的若干结构特征，前端大改后可能需要同步调整（失败时通常只是规则失效，不会弄坏页面）。
+- 「Antigravity」「Gemini」等名称与图标归 Google 所有；本仓库仅作个人使用与学习交流。
 
 ## License
 
-[MIT](LICENSE)
+MIT（见 `LICENSE`）。上游部分代码版权归 [jkfujinami/antigravity-client](https://github.com/jkfujinami/antigravity-client) 作者所有，原始说明见 `docs/upstream-README.md`。

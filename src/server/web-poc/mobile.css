@@ -1,0 +1,271 @@
+/*
+ * mobile.css — phone/tablet adaptation for the Antigravity web UI.
+ *
+ * Injected by the web POC proxy after the app's own stylesheets, so every rule
+ * here wins on equal specificity. Deliberately conservative: the desktop layout
+ * is left untouched above 700px, and nothing here restructures the React tree —
+ * only touch ergonomics, safe areas, keyboard handling and small-screen sizing.
+ *
+ * Opt out with MOBILE_UI=0 (see server.ts).
+ */
+
+/* ---------------------------------------------------------------------------
+ * 0. Tokens
+ * ------------------------------------------------------------------------ */
+html {
+  /* Filled in by mobile.js from window.visualViewport (keyboard-aware). */
+  --ag-vvh: 100dvh;
+  --ag-safe-top: env(safe-area-inset-top, 0px);
+  --ag-safe-right: env(safe-area-inset-right, 0px);
+  --ag-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --ag-safe-left: env(safe-area-inset-left, 0px);
+}
+
+/* ---------------------------------------------------------------------------
+ * 1. Global touch behaviour
+ * ------------------------------------------------------------------------ */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* Never bounce the whole document: the app owns its own scroll containers,
+   * and a rubber-banding body steals vertical drags from the chat list. */
+  overscroll-behavior: none;
+}
+
+body {
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+  /* The shell is 100dvh: nothing should scroll the document itself. */
+  overflow: hidden;
+}
+
+/* The app's root uses h-[100dvh]; drive it from the visual viewport instead so
+ * the composer stays above the on-screen keyboard (iOS Safari ignores dvh). */
+html.ag-mobile div[class*="h-[100dvh]"] {
+  height: var(--ag-vvh) !important;
+}
+
+/* Long-press selection is useful in chat; keep it, but kill the callout menu on
+ * chrome/buttons only. */
+.agy-button,
+.agy-titlebar,
+.agy-sidebar-row {
+  -webkit-touch-callout: none;
+}
+
+/* ---------------------------------------------------------------------------
+ * 2. Safe areas (notch / home indicator)
+ * ------------------------------------------------------------------------ */
+@media (max-width: 900px) {
+  /* Top menu bar: grow instead of squeezing its children.
+   * (.agy-shell starts with a few empty portal/style divs, so match the bar by
+   *  its own classes rather than by :first-child.) */
+  .agy-shell > div > div.flex.items-center.bg-sidebar.w-full {
+    height: auto;
+    min-height: 35px;
+    padding-top: var(--ag-safe-top);
+    padding-left: calc(8px + var(--ag-safe-left));
+    padding-right: calc(8px + var(--ag-safe-right));
+  }
+
+  /* Bottom composer: keep the input above the home indicator. */
+  .agy-composer-footer {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * 3. Touch ergonomics
+ * ------------------------------------------------------------------------ */
+
+/* iOS zooms the page when a focused field has font-size < 16px. Forcing 16px on
+ * touch devices is the only reliable fix short of disabling zoom. */
+@media (pointer: coarse) {
+  input,
+  textarea,
+  select,
+  [contenteditable="true"] {
+    font-size: 16px !important;
+  }
+
+  /* Icon buttons ship at 24–28px, which is below the 44px touch target Apple
+   * and Google recommend. Grow the hit area without changing the visual size:
+   * the pseudo-element is invisible and inherits the button's pointer events. */
+  .agy-button {
+    position: relative;
+  }
+  .agy-button::after {
+    content: "";
+    position: absolute;
+    inset: -8px;
+    /* Stay inside the button's own stacking context. */
+    z-index: 1;
+  }
+
+  /* Slightly larger glyph buttons in the titlebar / toolbar rows. */
+  .agy-button-icon,
+  .agy-button-icon-sm,
+  .agy-button-icon-lg {
+    min-width: 32px;
+    min-height: 32px;
+  }
+}
+
+/* Hover-only row actions: leave them alone.
+ *
+ * They are absolutely positioned over the row, and the row's own link is the
+ * element that opens the conversation. Forcing them visible with
+ * `pointer-events: auto` (an earlier version of this file did that) makes the
+ * strip swallow every tap, so tapping a conversation in the sidebar did
+ * nothing. Better to keep the app's hover behaviour: the primary action
+ * (open the conversation) must win on a phone. */
+
+
+/* ---------------------------------------------------------------------------
+ * 4. Small screens
+ * ------------------------------------------------------------------------ */
+@media (max-width: 700px) {
+  /* Dialogs / sheets: use the full viewport minus a small margin instead of the
+   * desktop max-width, and allow them to scroll. */
+  .agy-dialog {
+    max-width: calc(100vw - 16px) !important;
+    max-height: calc(var(--ag-vvh) - 24px) !important;
+  }
+
+  /* Titlebar: the project title + action cluster must not push the layout
+   * wider than the screen — allow ellipsis instead of overflow. */
+  .agy-titlebar {
+    gap: 4px;
+  }
+
+  /* Message bubble / code block padding: reclaim horizontal space. */
+  .agy-user-bubble-frame,
+  .agy-card,
+  .agy-callout {
+    border-radius: 10px;
+  }
+
+  .agy-md-table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Long words / URLs in messages should wrap instead of forcing a scrollbar. */
+  .agy-home p,
+  .agy-home li,
+  .agy-md-table {
+    overflow-wrap: anywhere;
+  }
+
+  /* Menubar (Workspace / View / Window): scrollable ribbon instead of clipping. */
+  .agy-shell > div > div.flex.items-center.bg-sidebar.w-full {
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+  .agy-shell > div > div.flex.items-center.bg-sidebar.w-full::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Very narrow phones (<360px, e.g. iPhone SE in portrait). */
+@media (max-width: 380px) {
+  .agy-dialog {
+    max-width: calc(100vw - 8px) !important;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * 5. Sidebar: full-width overlay drawer on phones
+ *
+ * The app sizes the sidebar inline as `min(256px, min(456px, 100% - 309px))`,
+ * which on a 390px screen collapses it to an 81px icon rail AND squeezes the
+ * chat to 308px. Taking the panel out of the flex flow fixes both ends:
+ *   - it becomes a ~84vw overlay (its own container queries then switch from
+ *     the icon rail to the labelled layout, so conversation titles are readable);
+ *   - the chat sheet keeps the full viewport width.
+ * The closed state (inline `width: 0px`) is left untouched.
+ * mobile.js adds the tap-to-close backdrop.
+ * ------------------------------------------------------------------------ */
+@media (max-width: 700px) {
+  .agy-inset-shell > div > div:first-child:has(.bg-sidebar) {
+    position: fixed !important;
+    left: 0 !important;
+    top: calc(35px + var(--ag-safe-top)) !important;
+    bottom: 0 !important;
+    width: min(84vw, 340px) !important;
+    max-width: min(84vw, 340px) !important;
+    z-index: 60 !important;
+    background: var(--sidebar) !important;
+    border-top-right-radius: 12px;
+    border-bottom-right-radius: 12px;
+    box-shadow: 12px 0 40px rgb(0 0 0 / 0.5) !important;
+    overflow: hidden;
+  }
+
+  .agy-inset-shell > div > div:first-child:has(.bg-sidebar) > div {
+    width: 100% !important;
+  }
+
+  /* Closed: React sets the inline width to 0px. Keep it in the flow, hidden. */
+  .agy-inset-shell > div > div:first-child:has(.bg-sidebar)[style*="width: 0px"] {
+    position: relative !important;
+    width: 0px !important;
+    max-width: 0px !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+  }
+
+  /* Tap-outside-to-close backdrop (created by mobile.js). */
+  .ag-sb-backdrop {
+    position: fixed;
+    left: 0;
+    right: 0;
+    top: calc(35px + var(--ag-safe-top));
+    bottom: 0;
+    z-index: 59;
+    background: rgb(0 0 0 / 0.45);
+    -webkit-backdrop-filter: blur(2px);
+    backdrop-filter: blur(2px);
+    opacity: 0;
+    transition: opacity 160ms ease;
+    pointer-events: auto;
+  }
+  .ag-sb-backdrop.ag-show {
+    opacity: 1;
+  }
+}
+
+/* Conversation rows: the app puts the click target in an `<a class="... absolute
+ * inset-0">` overlay, but in the narrow/rail layout that anchor collapses to
+ * 0×0 (position:relative, no size), so tapping a conversation in the drawer hit
+ * the row div — which has no handler — and nothing opened. Give the anchor its
+ * overlay geometry back; the href is already correct. */
+@media (max-width: 700px) {
+  [data-testid="conversation-row-sidebar"],
+  [data-testid="conversation-row-history"] {
+    position: relative;
+  }
+
+  /* The link overlay collapses to 0×0 in the narrow layout; give it back its
+   * geometry so native clicks have something to hit. (Taps are additionally
+   * handled in mobile.js — see the delegated row handler.) */
+  [data-testid="conversation-row-sidebar"] > a,
+  [data-testid="conversation-row-history"] > a {
+    position: absolute !important;
+    inset: 0 !important;
+    width: auto !important;
+    height: auto !important;
+    z-index: 2 !important;
+  }
+
+  [data-testid="conversation-row-sidebar"] > a,
+  [data-testid="conversation-row-history"] > a {
+    position: absolute !important;
+    inset: 0 !important;
+    width: auto !important;
+    height: auto !important;
+    z-index: 2 !important;
+  }
+}

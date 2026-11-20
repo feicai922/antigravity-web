@@ -141,3 +141,31 @@ vite.config.ts.timestamp-*
 temp_app_asar
 # web-poc self-signed certs
 src/server/web-poc/certs/
+
+# 本地运行态:语言服务器/代理的日志、pid、csrf token
+.mobile-web/
+frpc/*.log
+frpc/*.pid
+cloudflare/tunnel_token
+cloudflare/cloudflared.log
+cloudflare/*.log
+
+# ---- 运行时 / 凭据（绝不提交）----
+.mobile-web/
+frpc/frpc
+frpc/frpc.toml
+frpc/*.log
+frpc/*.pid
+cloudflare/tunnel_token
+cloudflare/*.log
+scripts/__pycache__/
+__pycache__/
+
+# ---- 构建产物 ----
+dist/
+
+# ---- 含个人内容的截图 ----
+docs/mobile-preview/
+
+# macOS
+.DS_Store

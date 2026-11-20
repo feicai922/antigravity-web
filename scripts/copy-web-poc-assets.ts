@@ -11,7 +11,7 @@ const outDir = path.resolve(__dirname, "../dist/src/server/web-poc");
 
 // Assets the server reads at runtime via __dirname (not picked up by tsc).
 // certs/ is intentionally omitted — it's generated on first run by ensureCert().
-const ASSETS = ["preload-shim.js"];
+const ASSETS = ["preload-shim.js", "mobile.css", "mobile.js", "locale-zh.js"];
 
 fs.mkdirSync(outDir, { recursive: true });
 for (const name of ASSETS) {

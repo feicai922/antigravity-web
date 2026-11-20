@@ -1,0 +1,37 @@
+# frp 客户端配置示例（frp 0.6x 的 toml 格式）
+#
+# 用法：
+#   1. 在 frp 服务商面板里创建一条 **TCP 隧道**：
+#        本地地址 127.0.0.1，本地端口 = 本代理端口（默认 8790）
+#        远程端口随便挑一个面板允许的
+#   2. 把面板生成的配置粘贴成 frpc/frpc.toml（**不要提交到 git**），
+#      并确认 localPort 与 START 脚本里的 PORT 一致
+#   3. cp frpc/frpc.toml.example frpc/frpc.toml && 编辑
+#   4. ./frpc/start.sh start
+#
+# 下面所有值都要换成你自己的。
+
+serverAddr = "your-frps.example.com"
+serverPort = 7000
+user = "your-user-id"
+loginFailExit = false
+
+# 被限速时可以试试 websocket 传输
+# transport.protocol = "websocket"
+transport.heartbeatInterval = 10
+transport.heartbeatTimeout = 60
+
+[[proxies]]
+type = "tcp"
+# 面板里创建隧道时分配的 name，不能随便改
+name = "your-tunnel-name"
+localIP = "127.0.0.1"
+# 本机 web 代理端口（与 start-mobile-web.sh 的 PORT 一致）
+localPort = 8790
+# 公网访问端口：https://<serverAddr>:<remotePort>/
+remotePort = 8790
+
+# 报错时可以先删掉下面两行试试
+transport.useEncryption = true
+# HTTP 层已经是 gzip，frp 再压一次纯烧 CPU，建议关掉
+transport.useCompression = false

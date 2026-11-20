@@ -9,6 +9,7 @@ import { homedir } from "os";
 import * as path from "path";
 import * as fs from "fs";
 import { Topic } from "../gen/exa/unified_state_sync_pb/unified_state_sync_pb.js";
+import { Timestamp } from "@bufbuild/protobuf";
 import { OAuthTokenInfo } from "../gen/exa/language_server_pb/language_server_pb.js";
 
 /**
@@ -181,10 +182,82 @@ export function readUssOAuthData(): UssOAuthData {
 }
 
 /**
+ * Fallback auth source for Linux CLI / VS Code-server installs.
+ *
+ * Those builds store no VSCode-style `state.vscdb`; the `agy` CLI keeps its
+ * credential in `<geminiDir>/jetski-standalone-oauth-token` as plain JSON:
+ *   { token: { access_token, token_type, refresh_token, expiry }, auth_method, id_token_email, writer_id }
+ * We synthesize the same `OAuthTokenInfo` protobuf the LS expects over USS, so
+ * the standalone web server works without the desktop app installed.
+ *
+ * Override the path with AG_TOKEN_FILE (e.g. to point at an isolated profile).
+ */
+function standaloneTokenPaths(): string[] {
+    const override = process.env.AG_TOKEN_FILE?.trim();
+    const paths = [];
+    if (override) paths.push(override);
+    const geminiDir = process.env.GEMINI_DIR?.trim();
+    if (geminiDir) paths.push(path.join(geminiDir, "jetski-standalone-oauth-token"));
+    // Credentials are per-user, not per-profile: an isolated GEMINI_DIR still
+    // borrows the logged-in user's token from the default location.
+    paths.push(path.join(homedir(), ".gemini", "jetski-standalone-oauth-token"));
+    return paths;
+}
+
+interface StandaloneToken {
+    ussOAuth: UssOAuthData;
+    apiKey: string;
+    email: string;
+    /** Timestamp (ms) at which the access token expires, to decide on a refresh. */
+    expiresAt: number;
+}
+
+function readStandaloneToken(): StandaloneToken | null {
+    try {
+        const tokenPath = standaloneTokenPaths().find((p) => fs.existsSync(p));
+        if (!tokenPath) return null;
+        const raw = JSON.parse(fs.readFileSync(tokenPath, "utf-8")) as {
+            token?: { access_token?: string; token_type?: string; refresh_token?: string; expiry?: string };
+            id_token_email?: string;
+        };
+        const accessToken = raw.token?.access_token || "";
+        if (!accessToken) return null;
+        const expiryDate = raw.token?.expiry ? new Date(raw.token.expiry) : undefined;
+        const info = new OAuthTokenInfo({
+            accessToken,
+            tokenType: raw.token?.token_type || "Bearer",
+            refreshToken: raw.token?.refresh_token || "",
+            expiry: expiryDate && !Number.isNaN(expiryDate.getTime()) ? Timestamp.fromDate(expiryDate) : undefined,
+        });
+        return {
+            ussOAuth: {
+                key: "oauthTokenInfoSentinelKey",
+                value: Buffer.from(info.toBinary()).toString("base64"),
+            },
+            apiKey: accessToken,
+            email: raw.id_token_email || "",
+            expiresAt: expiryDate && !Number.isNaN(expiryDate.getTime()) ? expiryDate.getTime() : 0,
+        };
+    } catch {
+        return null;
+    }
+}
+
+/**
  * Read all auth data needed for independent LS operation.
  */
 export function readAuthData(): AuthData {
     const status = readAuthStatus();
-    const ussOAuth = readUssOAuthData();
+    let ussOAuth = readUssOAuthData();
+    // No VSCode profile here (Linux CLI / VS Code-server install): fall back to
+    // the CLI's own token file so standalone launch still authenticates.
+    if (!ussOAuth.value) {
+        const standalone = readStandaloneToken();
+        if (standalone) {
+            ussOAuth = standalone.ussOAuth;
+            status.apiKey = status.apiKey || standalone.apiKey;
+            status.email = status.email || standalone.email;
+        }
+    }
     return { ...status, ussOAuth };
 }
